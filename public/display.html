@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Reveal Board</title>
+  <style>
+    :root { color-scheme: dark; }
+    body {
+      margin: 0; min-height: 100vh; background: #000;
+      font-family: "Open Sans", "Segoe UI", Helvetica, Arial, sans-serif;
+      color: #fff; display: flex; flex-direction: column; align-items: center;
+      justify-content: center; padding: 40px; box-sizing: border-box;
+    }
+    h1 { font-size: 28px; margin-bottom: 36px; color: #fff; }
+    .board { width: 100%; max-width: 900px; display: flex; flex-direction: column; gap: 14px; }
+    .row {
+      display: flex; align-items: center; gap: 20px; background: #141414;
+      border-radius: 10px; padding: 18px 24px; border: 1px solid #262626;
+    }
+    .rank {
+      width: 44px; height: 44px; border-radius: 50%; background: #86BC25; color: #000;
+      font-weight: 800; font-size: 20px; display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+    }
+    .label { font-size: 22px; font-weight: 600; }
+    .hidden .label { color: #555; letter-spacing: 4px; }
+    .revealed .rank { background: linear-gradient(90deg, #86BC25, #00A3E0); }
+  </style>
+</head>
+<body>
+  <h1 id="roundLabel">Loading…</h1>
+  <div class="board" id="board"></div>
+
+  <script>
+    const roundId = window.location.pathname.split("/").filter(Boolean).pop();
+
+    async function loadRoundLabel() {
+      const res = await fetch(`/api/rounds/${roundId}/public`);
+      if (res.ok) {
+        const info = await res.json();
+        document.getElementById("roundLabel").textContent = info.label;
+      }
+    }
+
+    async function poll() {
+      const res = await fetch(`/api/rounds/${roundId}/display-board`);
+      if (!res.ok) return;
+      const data = await res.json();
+      const boardEl = document.getElementById("board");
+
+      if (!data.rows) {
+        boardEl.innerHTML = '<div style="color:#777;font-size:18px;text-align:center;width:100%;">Board not ready yet…</div>';
+        return;
+      }
+
+      boardEl.innerHTML = "";
+      for (const row of data.rows) {
+        const div = document.createElement("div");
+        div.className = `row ${row.revealed ? "revealed" : "hidden"}`;
+        div.innerHTML = `
+          <div class="rank">${row.rank}</div>
+          <div class="label">${row.revealed ? escapeHtml(row.label) : "? ? ? ? ?"}</div>
+        `;
+        boardEl.appendChild(div);
+      }
+    }
+
+    function escapeHtml(s) {
+      const d = document.createElement("div");
+      d.textContent = s;
+      return d.innerHTML;
+    }
+
+    loadRoundLabel();
+    poll();
+    setInterval(poll, 1000);
+  </script>
+</body>
+</html>

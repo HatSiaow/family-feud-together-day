@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Host Control Panel</title>
+  <style>
+    :root { color-scheme: dark; }
+    body {
+      margin: 0; background: #000; color: #fff; min-height: 100vh;
+      font-family: "Open Sans", "Segoe UI", Helvetica, Arial, sans-serif;
+      padding: 32px; box-sizing: border-box;
+    }
+    h1 { font-size: 24px; margin-bottom: 24px; }
+    .rounds { display: flex; flex-direction: column; gap: 20px; max-width: 920px; }
+    .round-card {
+      background: #141414; border: 1px solid #262626; border-radius: 12px; padding: 20px;
+    }
+    .round-head { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; }
+    .round-title { font-size: 18px; font-weight: 700; }
+    .status { font-size: 12px; padding: 4px 10px; border-radius: 999px; background: #262626; color: #D0D0CE; text-transform: uppercase; }
+    .status.open { background: #0D8390; color: #fff; }
+    .status.clustered { background: #046A38; color: #fff; }
+    .meta { font-size: 13px; color: #777; margin-top: 6px; }
+    .actions { display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
+    button {
+      padding: 10px 16px; font-size: 14px; font-weight: 700; border: none; border-radius: 8px;
+      background: #86BC25; color: #000; cursor: pointer;
+    }
+    button.secondary { background: #262626; color: #fff; }
+    button.danger { background: #a33; color: #fff; }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+    .qr-area { margin-top: 14px; display: flex; align-items: center; gap: 16px; }
+    .qr-area img { width: 120px; height: 120px; background: #fff; border-radius: 8px; }
+    .qr-url { font-size: 13px; color: #9FE870; word-break: break-all; }
+    .board-rows { margin-top: 14px; display: flex; flex-direction: column; gap: 8px; }
+    .board-row { display: flex; align-items: center; gap: 10px; background: #1a1a1a; border-radius: 8px; padding: 8px 12px; }
+    .board-row .rank { width: 24px; font-weight: 800; color: #86BC25; }
+    .board-row .label { flex: 1; font-size: 14px; }
+    .board-row .source { font-size: 11px; color: #777; }
+    .board-row button { padding: 6px 10px; font-size: 12px; }
+    .login { max-width: 360px; }
+    input[type=password] {
+      width: 100%; box-sizing: border-box; padding: 12px; border-radius: 8px; border: 1px solid #333;
+      background: #141414; color: #fff; margin-bottom: 12px; font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <div id="loginArea" class="login">
+    <h1>Host Control Panel</h1>
+    <p style="color:#999;">Enter the admin token to continue.</p>
+    <input type="password" id="tokenInput" placeholder="Admin token" />
+    <button id="loginBtn">Enter</button>
+  </div>
+
+  <div id="mainArea" style="display:none;">
+    <h1>Host Control Panel</h1>
+    <div class="rounds" id="rounds"></div>
+  </div>
+
+  <script>
+    const TOKEN_KEY = "feud_admin_token";
+
+    function getToken() { return sessionStorage.getItem(TOKEN_KEY) || ""; }
+    function setToken(t) { sessionStorage.setItem(TOKEN_KEY, t); }
+
+    async function api(path, options = {}) {
+      const res = await fetch(path, {
+        ...options,
+        headers: { "Content-Type": "application/json", "X-Admin-Token": getToken(), ...(options.headers || {}) },
+      });
+      if (res.status === 401) throw new Error("unauthorized");
+      return res;
+    }
+
+    document.getElementById("loginBtn").addEventListener("click", async () => {
+      setToken(document.getElementById("tokenInput").value.trim());
+      try {
+        const res = await api("/api/rounds");
+        if (!res.ok) throw new Error("bad token");
+        document.getElementById("loginArea").style.display = "none";
+        document.getElementById("mainArea").style.display = "block";
+        refresh();
+      } catch (e) {
+        alert("Invalid token or server unreachable.");
+      }
+    });
+
+    async function refresh() {
+      const res = await api("/api/rounds");
+      const rounds = await res.json();
+      const container = document.getElementById("rounds");
+      container.innerHTML = "";
+      for (const r of rounds) {
+        container.appendChild(await renderRoundCard(r));
+      }
+    }
+
+    async function renderRoundCard(r) {
+      const card = document.createElement("div");
+      card.className = "round-card";
+
+      card.innerHTML = `
+        <div class="round-head">
+          <div class="round-title">${r.label}</div>
+          <div class="status ${r.status}">${r.status}</div>
+        </div>
+        <div class="meta">Responses: ${r.response_count}</div>
+        <div class="actions">
+          <button data-action="open" ${r.status === "open" ? "disabled" : ""}>Open / Show QR</button>
+          <button data-action="close" ${r.status !== "open" ? "disabled" : ""}>Close &amp; Cluster</button>
+          <button class="secondary" data-action="qr">Show QR</button>
+          <button class="danger" data-action="reset">Reset</button>
+        </div>
+        <div class="qr-area" style="display:none;"></div>
+        <div class="board-rows"></div>
+      `;
+
+      card.querySelector('[data-action="open"]').addEventListener("click", async () => {
+        await api(`/api/rounds/${r.id}/open`, { method: "POST" });
+        refresh();
+      });
+
+      card.querySelector('[data-action="close"]').addEventListener("click", async (e) => {
+        e.target.disabled = true;
+        e.target.textContent = "Clustering…";
+        const res = await api(`/api/rounds/${r.id}/close`, { method: "POST" });
+        const data = await res.json();
+        if (!res.ok) {
+          alert(`Clustering failed: ${data.error}`);
+        }
+        refresh();
+      });
+
+      card.querySelector('[data-action="qr"]').addEventListener("click", async () => {
+        const qrArea = card.querySelector(".qr-area");
+        const res = await api(`/api/rounds/${r.id}/qr`);
+        const data = await res.json();
+        qrArea.style.display = "flex";
+        qrArea.innerHTML = `<img src="${data.dataUrl}" /><div class="qr-url">${data.url}</div>`;
+      });
+
+      card.querySelector('[data-action="reset"]').addEventListener("click", async () => {
+        if (!confirm(`Reset ${r.label}? This clears responses and the board.`)) return;
+        await api(`/api/rounds/${r.id}/reset`, { method: "POST" });
+        refresh();
+      });
+
+      if (r.board_ready) {
+        const boardRes = await api(`/api/rounds/${r.id}/board`);
+        const { board } = await boardRes.json();
+        const rowsEl = card.querySelector(".board-rows");
+        for (const row of board.board) {
+          const rowEl = document.createElement("div");
+          rowEl.className = "board-row";
+          rowEl.innerHTML = `
+            <div class="rank">${row.rank}</div>
+            <div class="label">${escapeHtml(row.label)}</div>
+            <div class="source">${row.source}${row.count ? " · " + row.count : ""}</div>
+          `;
+          const revealBtn = document.createElement("button");
+          revealBtn.textContent = row.revealed ? "Revealed" : "Reveal";
+          revealBtn.disabled = row.revealed;
+          revealBtn.addEventListener("click", async () => {
+            await api(`/api/rounds/${r.id}/reveal/${row.rank}`, { method: "POST" });
+            refresh();
+          });
+          rowEl.appendChild(revealBtn);
+          rowsEl.appendChild(rowEl);
+        }
+      }
+
+      return card;
+    }
+
+    function escapeHtml(s) {
+      const d = document.createElement("div");
+      d.textContent = s;
+      return d.innerHTML;
+    }
+
+    // Auto-login if a token is already stored this session.
+    if (getToken()) {
+      document.getElementById("loginArea").style.display = "none";
+      document.getElementById("mainArea").style.display = "block";
+      refresh();
+    }
+    setInterval(() => {
+      if (document.getElementById("mainArea").style.display !== "none") refresh();
+    }, 4000);
+  </script>
+</body>
+</html>

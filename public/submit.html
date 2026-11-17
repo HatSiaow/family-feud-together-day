@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Quick Question</title>
+  <style>
+    :root { color-scheme: dark; }
+    body {
+      margin: 0; min-height: 100vh; background: #000;
+      font-family: "Open Sans", "Segoe UI", Helvetica, Arial, sans-serif;
+      color: #fff; display: flex; align-items: center; justify-content: center;
+      padding: 24px; box-sizing: border-box;
+    }
+    .card { width: 100%; max-width: 480px; }
+    .label { color: #D0D0CE; font-size: 14px; margin-bottom: 8px; }
+    h1 { font-size: 22px; line-height: 1.35; color: #fff; margin: 0 0 24px; }
+    textarea {
+      width: 100%; box-sizing: border-box; min-height: 100px; padding: 14px;
+      font-size: 16px; border-radius: 10px; border: 1px solid #333;
+      background: #141414; color: #fff; font-family: inherit; resize: vertical;
+    }
+    .count { text-align: right; font-size: 12px; color: #777; margin-top: 4px; }
+    button {
+      margin-top: 16px; width: 100%; padding: 14px; font-size: 16px; font-weight: 700;
+      border: none; border-radius: 10px; background: #86BC25; color: #000; cursor: pointer;
+    }
+    button:disabled { background: #333; color: #777; cursor: not-allowed; }
+    .msg { margin-top: 20px; font-size: 15px; color: #9FE870; }
+    .waiting { color: #D0D0CE; font-size: 15px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="label" id="roundLabel">Loading…</div>
+    <h1 id="question">&nbsp;</h1>
+    <div id="formArea"></div>
+    <div id="msgArea"></div>
+  </div>
+
+  <script>
+    const roundId = window.location.pathname.split("/").filter(Boolean).pop();
+    const storageKey = `feud_submitted_${roundId}`;
+    const MAX_SUBMISSIONS = 2;
+
+    function submittedCount() {
+      return Number(localStorage.getItem(storageKey) || "0");
+    }
+    function recordSubmission() {
+      localStorage.setItem(storageKey, String(submittedCount() + 1));
+    }
+
+    async function loadRound() {
+      const res = await fetch(`/api/rounds/${roundId}/public`);
+      if (!res.ok) {
+        document.getElementById("question").textContent = "Round not found.";
+        return;
+      }
+      const info = await res.json();
+      document.getElementById("roundLabel").textContent = info.label;
+      document.getElementById("question").textContent = info.question;
+      render(info.status);
+    }
+
+    function render(status) {
+      const formArea = document.getElementById("formArea");
+      const msgArea = document.getElementById("msgArea");
+      formArea.innerHTML = "";
+      msgArea.innerHTML = "";
+
+      if (status !== "open") {
+        msgArea.innerHTML = '<div class="waiting">Not open yet — hang tight, the host will open this shortly.</div>';
+        return;
+      }
+      if (submittedCount() >= MAX_SUBMISSIONS) {
+        msgArea.innerHTML = '<div class="msg">Thanks — you\'ve already answered this one!</div>';
+        return;
+      }
+
+      const textarea = document.createElement("textarea");
+      textarea.maxLength = 200;
+      textarea.placeholder = "Type your answer…";
+      const count = document.createElement("div");
+      count.className = "count";
+      count.textContent = "0 / 200";
+      textarea.addEventListener("input", () => {
+        count.textContent = `${textarea.value.length} / 200`;
+      });
+
+      const btn = document.createElement("button");
+      btn.textContent = "Submit";
+      btn.addEventListener("click", async () => {
+        const text = textarea.value.trim();
+        if (!text) return;
+        btn.disabled = true;
+        btn.textContent = "Submitting…";
+        try {
+          const res = await fetch(`/api/rounds/${roundId}/submit`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text }),
+          });
+          if (!res.ok) throw new Error((await res.json()).error || "submit failed");
+          recordSubmission();
+          render("open");
+          document.getElementById("msgArea").innerHTML = '<div class="msg">Thanks for your answer!</div>';
+        } catch (e) {
+          btn.disabled = false;
+          btn.textContent = "Submit";
+          msgArea.innerHTML = `<div class="waiting">Something went wrong: ${e.message}</div>`;
+        }
+      });
+
+      formArea.appendChild(textarea);
+      formArea.appendChild(count);
+      formArea.appendChild(btn);
+    }
+
+    loadRound();
+    setInterval(loadRound, 3000);
+  </script>
+</body>
+</html>

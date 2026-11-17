@@ -1,0 +1,38 @@
+[
+  {
+    "id": "round-1",
+    "label": "Spotlight Round 1",
+    "question": "What do you think the client praised most about this project?",
+    "fallback_list": [
+      "Speed of delivery",
+      "A memorable interactive tool used during the engagement",
+      "Clarity of the proposed roadmap",
+      "Depth of the technical/engineering work",
+      "Strong collaboration with the client team"
+    ]
+  },
+  {
+    "id": "round-2",
+    "label": "Spotlight Round 2",
+    "question": "What do you think was the biggest challenge on this project?",
+    "fallback_list": [
+      "Placeholder - TBD with directors",
+      "Placeholder - TBD with directors",
+      "Placeholder - TBD with directors",
+      "Placeholder - TBD with directors",
+      "Placeholder - TBD with directors"
+    ]
+  },
+  {
+    "id": "round-3",
+    "label": "Spotlight Round 3",
+    "question": "What do you think the team learned or grew the most from on this project?",
+    "fallback_list": [
+      "Placeholder - TBD with directors",
+      "Placeholder - TBD with directors",
+      "Placeholder - TBD with directors",
+      "Placeholder - TBD with directors",
+      "Placeholder - TBD with directors"
+    ]
+  }
+]
