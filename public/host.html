@@ -87,42 +87,40 @@
       }
     });
 
+    // Per-round state kept client-side so the 4s poll never has to tear down
+    // and rebuild the DOM (that was the source of the flicker). The QR data
+    // URL is fetched once per round and cached — it never changes while a
+    // round exists, so there's no reason to re-fetch it every poll either.
+    const cards = {};       // roundId -> card element
+    const qrCache = {};     // roundId -> { url, dataUrl }
+    let lastBoardJson = {}; // roundId -> last-rendered board JSON (skip re-render if unchanged)
+
     async function refresh() {
       const res = await api("/api/rounds");
       const rounds = await res.json();
       const container = document.getElementById("rounds");
-      container.innerHTML = "";
+
       for (const r of rounds) {
-        container.appendChild(await renderRoundCard(r));
+        if (!cards[r.id]) {
+          cards[r.id] = buildCard(r);
+          container.appendChild(cards[r.id]);
+        }
+        await updateCard(cards[r.id], r);
       }
     }
 
-    // Tracks which rounds currently have their QR code shown, so the
-    // periodic refresh() re-render doesn't silently hide it again.
-    const qrVisible = {};
-
-    async function showQr(roundId, qrArea) {
-      const res = await api(`/api/rounds/${roundId}/qr`);
-      const data = await res.json();
-      qrArea.style.display = "flex";
-      qrArea.innerHTML = `<img src="${data.dataUrl}" /><div class="qr-url">${data.url}</div>`;
-      qrVisible[roundId] = true;
-    }
-
-    async function renderRoundCard(r) {
+    function buildCard(r) {
       const card = document.createElement("div");
       card.className = "round-card";
-
       card.innerHTML = `
         <div class="round-head">
           <div class="round-title">${r.label}</div>
-          <div class="status ${r.status}">${r.status}</div>
+          <div class="status">${r.status}</div>
         </div>
-        <div class="meta">Responses: ${r.response_count}</div>
+        <div class="meta"></div>
         <div class="actions">
-          <button data-action="open" ${r.status === "open" ? "disabled" : ""}>Open / Show QR</button>
-          <button data-action="close" ${r.status !== "open" ? "disabled" : ""}>Close &amp; Cluster</button>
-          <button class="secondary" data-action="qr">Show QR</button>
+          <button data-action="open">Open Round + Show QR</button>
+          <button data-action="close" disabled>Close &amp; Cluster</button>
           <button class="danger" data-action="reset">Reset</button>
         </div>
         <div class="qr-area" style="display:none;"></div>
@@ -131,6 +129,7 @@
 
       card.querySelector('[data-action="open"]').addEventListener("click", async () => {
         await api(`/api/rounds/${r.id}/open`, { method: "POST" });
+        await showQr(r.id, card.querySelector(".qr-area"));
         refresh();
       });
 
@@ -139,54 +138,92 @@
         e.target.textContent = "Clustering…";
         const res = await api(`/api/rounds/${r.id}/close`, { method: "POST" });
         const data = await res.json();
-        if (!res.ok) {
-          alert(`Clustering failed: ${data.error}`);
-        }
+        if (!res.ok) alert(`Clustering failed: ${data.error}`);
+        e.target.textContent = "Close & Cluster";
         refresh();
-      });
-
-      card.querySelector('[data-action="qr"]').addEventListener("click", async () => {
-        const qrArea = card.querySelector(".qr-area");
-        await showQr(r.id, qrArea);
       });
 
       card.querySelector('[data-action="reset"]').addEventListener("click", async () => {
         if (!confirm(`Reset ${r.label}? This clears responses and the board.`)) return;
-        qrVisible[r.id] = false;
+        delete qrCache[r.id];
+        delete lastBoardJson[r.id];
+        card.querySelector(".qr-area").style.display = "none";
+        card.querySelector(".board-rows").innerHTML = "";
         await api(`/api/rounds/${r.id}/reset`, { method: "POST" });
         refresh();
       });
 
-      if (r.board_ready) {
-        const boardRes = await api(`/api/rounds/${r.id}/board`);
-        const { board } = await boardRes.json();
-        const rowsEl = card.querySelector(".board-rows");
-        for (const row of board.board) {
-          const rowEl = document.createElement("div");
-          rowEl.className = "board-row";
-          rowEl.innerHTML = `
-            <div class="rank">${row.rank}</div>
-            <div class="label">${escapeHtml(row.label)}</div>
-            <div class="source">${row.source}${row.count ? " · " + row.count : ""}</div>
-          `;
-          const revealBtn = document.createElement("button");
-          revealBtn.textContent = row.revealed ? "Revealed" : "Reveal";
-          revealBtn.disabled = row.revealed;
-          revealBtn.addEventListener("click", async () => {
-            await api(`/api/rounds/${r.id}/reveal/${row.rank}`, { method: "POST" });
-            refresh();
-          });
-          rowEl.appendChild(revealBtn);
-          rowsEl.appendChild(rowEl);
-        }
-      }
+      return card;
+    }
 
-      // Re-display the QR if it was visible before this periodic refresh.
-      if (qrVisible[r.id]) {
+    async function showQr(roundId, qrArea) {
+      if (!qrCache[roundId]) {
+        const res = await api(`/api/rounds/${roundId}/qr`);
+        qrCache[roundId] = await res.json();
+      }
+      const { url, dataUrl } = qrCache[roundId];
+      qrArea.style.display = "flex";
+      // Only touch the DOM if the image isn't already showing this URL —
+      // avoids re-creating the <img> element (and any visible flash) on
+      // every poll once it's already displayed.
+      if (qrArea.dataset.shownUrl !== url) {
+        qrArea.innerHTML = `<img src="${dataUrl}" /><div class="qr-url">${url}</div>`;
+        qrArea.dataset.shownUrl = url;
+      }
+    }
+
+    async function updateCard(card, r) {
+      // Status badge + response count — cheap text/class updates, no flicker.
+      const statusEl = card.querySelector(".status");
+      if (statusEl.textContent !== r.status) {
+        statusEl.textContent = r.status;
+        statusEl.className = `status ${r.status}`;
+      }
+      card.querySelector(".meta").textContent = `Responses: ${r.response_count}`;
+
+      card.querySelector('[data-action="open"]').disabled = r.status !== "pending";
+      card.querySelector('[data-action="close"]').disabled = r.status !== "open";
+
+      // Keep the QR visible (using the cached image) whenever the round is open.
+      if (r.status === "open") {
         await showQr(r.id, card.querySelector(".qr-area"));
       }
 
-      return card;
+      if (r.board_ready) {
+        const boardRes = await api(`/api/rounds/${r.id}/board`);
+        const { board } = await boardRes.json();
+        const serialized = JSON.stringify(board.board);
+        // Skip the rebuild entirely if nothing about the board changed —
+        // this is what stops the reveal buttons from flickering/resetting.
+        if (lastBoardJson[r.id] !== serialized) {
+          lastBoardJson[r.id] = serialized;
+          renderBoardRows(card, r.id, board.board);
+        }
+      }
+    }
+
+    function renderBoardRows(card, roundId, rows) {
+      const rowsEl = card.querySelector(".board-rows");
+      rowsEl.innerHTML = "";
+      for (const row of rows) {
+        const rowEl = document.createElement("div");
+        rowEl.className = "board-row";
+        rowEl.innerHTML = `
+          <div class="rank">${row.rank}</div>
+          <div class="label">${escapeHtml(row.label)}</div>
+          <div class="source">${row.source}${row.count ? " · " + row.count : ""}</div>
+        `;
+        const revealBtn = document.createElement("button");
+        revealBtn.textContent = row.revealed ? "Revealed" : "Reveal";
+        revealBtn.disabled = row.revealed;
+        revealBtn.addEventListener("click", async () => {
+          await api(`/api/rounds/${roundId}/reveal/${row.rank}`, { method: "POST" });
+          delete lastBoardJson[roundId]; // force a re-render to reflect the reveal
+          refresh();
+        });
+        rowEl.appendChild(revealBtn);
+        rowsEl.appendChild(rowEl);
+      }
     }
 
     function escapeHtml(s) {
