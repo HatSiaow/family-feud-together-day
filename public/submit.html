@@ -44,6 +44,14 @@
     const MAX_SUBMISSIONS = 2;
     let lastStatus = null;
 
+    // Rehearsal/testing convenience: visiting the link with ?retest=1 clears
+    // this device's own submission counter for this round. Never present on
+    // the plain QR-code URL, so it doesn't weaken the real anti-spam limit
+    // for actual audience members on the day.
+    if (new URLSearchParams(window.location.search).has("retest")) {
+      localStorage.removeItem(storageKey);
+    }
+
     function submittedCount() {
       return Number(localStorage.getItem(storageKey) || "0");
     }
