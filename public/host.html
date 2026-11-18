@@ -97,6 +97,18 @@
       }
     }
 
+    // Tracks which rounds currently have their QR code shown, so the
+    // periodic refresh() re-render doesn't silently hide it again.
+    const qrVisible = {};
+
+    async function showQr(roundId, qrArea) {
+      const res = await api(`/api/rounds/${roundId}/qr`);
+      const data = await res.json();
+      qrArea.style.display = "flex";
+      qrArea.innerHTML = `<img src="${data.dataUrl}" /><div class="qr-url">${data.url}</div>`;
+      qrVisible[roundId] = true;
+    }
+
     async function renderRoundCard(r) {
       const card = document.createElement("div");
       card.className = "round-card";
@@ -135,14 +147,12 @@
 
       card.querySelector('[data-action="qr"]').addEventListener("click", async () => {
         const qrArea = card.querySelector(".qr-area");
-        const res = await api(`/api/rounds/${r.id}/qr`);
-        const data = await res.json();
-        qrArea.style.display = "flex";
-        qrArea.innerHTML = `<img src="${data.dataUrl}" /><div class="qr-url">${data.url}</div>`;
+        await showQr(r.id, qrArea);
       });
 
       card.querySelector('[data-action="reset"]').addEventListener("click", async () => {
         if (!confirm(`Reset ${r.label}? This clears responses and the board.`)) return;
+        qrVisible[r.id] = false;
         await api(`/api/rounds/${r.id}/reset`, { method: "POST" });
         refresh();
       });
@@ -169,6 +179,11 @@
           rowEl.appendChild(revealBtn);
           rowsEl.appendChild(rowEl);
         }
+      }
+
+      // Re-display the QR if it was visible before this periodic refresh.
+      if (qrVisible[r.id]) {
+        await showQr(r.id, card.querySelector(".qr-area"));
       }
 
       return card;

@@ -42,6 +42,7 @@
     const roundId = window.location.pathname.split("/").filter(Boolean).pop();
     const storageKey = `feud_submitted_${roundId}`;
     const MAX_SUBMISSIONS = 2;
+    let lastStatus = null;
 
     function submittedCount() {
       return Number(localStorage.getItem(storageKey) || "0");
@@ -59,7 +60,10 @@
       const info = await res.json();
       document.getElementById("roundLabel").textContent = info.label;
       document.getElementById("question").textContent = info.question;
-      render(info.status);
+      if (info.status !== lastStatus) {
+        lastStatus = info.status;
+        render(info.status);
+      }
     }
 
     function render(status) {
